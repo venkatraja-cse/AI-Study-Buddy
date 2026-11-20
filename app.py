@@ -1,118 +1,91 @@
 
 import streamlit as st
-from google import genai
 from pypdf import PdfReader
-import os
+import re
+from collections import Counter
 
-st.set_page_config(
-    page_title="AI Study Buddy",
-    page_icon="📚",
-    layout="centered"
-)
+st.set_page_config(page_title="AI Study Buddy", page_icon="📚")
 
 st.title("📚 AI Study Buddy")
-st.write("Convert your notes into summaries, quizzes and revision materials!")
+st.write("Turn your notes into revision materials!")
 
-# Get Gemini API key securely
-api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-
-if not api_key:
-    st.error("Gemini API key is not configured. Add it in Streamlit Secrets.")
-    st.stop()
-
-client = genai.Client(api_key=api_key)
-
-st.subheader("📄 Upload your notes")
-
-uploaded_file = st.file_uploader(
-    "Upload a PDF file",
-    type=["pdf"]
-)
+uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
 
 pasted_notes = st.text_area(
-    "Or paste your notes here",
-    height=180,
-    placeholder="Paste your study notes..."
+    "Or paste your study notes",
+    height=180
 )
 
 def extract_pdf(file):
     reader = PdfReader(file)
-    pages = []
-    for page in reader.pages:
-        pages.append(page.extract_text() or "")
-    return "\n".join(pages)
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
-if st.button("✨ Generate Study Material", type="primary"):
+def make_summary(notes):
+    sentences = re.split(r'(?<=[.!?])\s+', notes)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 25]
+    return sentences[:6]
 
+def make_terms(notes):
+    words = re.findall(r'\b[A-Za-z]{5,}\b', notes.lower())
+    common = Counter(words).most_common(3)
+    return [word for word, count in common]
+
+if st.button("Generate Study Materials"):
     notes = pasted_notes.strip()
 
-    if uploaded_file is not None:
-        try:
-            notes = extract_pdf(uploaded_file).strip()
-        except Exception as e:
-            st.error(f"Could not read PDF: {e}")
-            st.stop()
+    if uploaded_file:
+        notes = extract_pdf(uploaded_file).strip()
 
     if not notes:
-        st.warning("Please upload a PDF or paste your notes.")
-        st.stop()
+        st.warning("Please upload a PDF or paste notes.")
+    else:
+        summary = make_summary(notes)
+        terms = make_terms(notes)
 
-    with st.spinner("AI is preparing your study materials..."):
+        st.session_state["summary"] = summary
+        st.session_state["terms"] = terms
+        st.session_state["notes"] = notes
 
-        prompt = f"""
-You are an AI Study Buddy.
-
-Read the following study notes and create:
-
-1. SUMMARY:
-Give exactly 5 to 6 important bullet points.
-
-2. MULTIPLE CHOICE QUESTIONS:
-Create exactly 5 MCQs.
-Each question must have 4 options (A, B, C, D).
-Give the correct answer after each question.
-
-3. IMPORTANT TERMS:
-Explain exactly 3 important terms in simple English.
-
-4. REVISION TIPS:
-Give a short list of important points to revise.
-
-Use clear, student-friendly English.
-Only use information supported by the notes.
-If information is missing, do not invent it.
-
-STUDY NOTES:
-{notes}
-"""
-
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-
-            result = response.text or "No response generated."
-
-            st.session_state["study_result"] = result
-
-        except Exception as e:
-            st.error(f"AI generation failed: {e}")
-
-if "study_result" in st.session_state:
-
+if "summary" in st.session_state:
     st.divider()
-    st.subheader("🎓 Your Study Materials")
 
-    st.markdown(st.session_state["study_result"])
+    st.subheader("📝 Summary")
+    for point in st.session_state["summary"]:
+        st.write("•", point)
+
+    st.subheader("📖 Important Terms")
+    for term in st.session_state["terms"]:
+        st.write("•", term.capitalize())
+
+    st.subheader("❓ Practice Questions")
+
+    questions = [
+        "What is the main topic of your notes?",
+        "Which concept is important in the notes?",
+        "What is the purpose of the topic?",
+        "Which term appears in the notes?",
+        "What did you learn from this topic?"
+    ]
+
+    for i, question in enumerate(questions, 1):
+        st.write(f"**{i}. {question}**")
+
+    revision = "AI STUDY BUDDY - REVISION PACK\n\n"
+    revision += "SUMMARY\n"
+    revision += "\n".join("- " + x for x in st.session_state["summary"])
+    revision += "\n\nIMPORTANT TERMS\n"
+    revision += "\n".join(st.session_state["terms"])
+    revision += "\n\nPRACTICE QUESTIONS\n"
+    revision += "\n".join(questions)
 
     st.download_button(
-        label="⬇️ Download Revision Pack",
-        data=st.session_state["study_result"],
-        file_name="AI_Study_Buddy_Revision_Pack.txt",
+        "⬇️ Download Revision Pack",
+        data=revision,
+        file_name="Revision_Pack.txt",
         mime="text/plain"
     )
 
 st.divider()
-st.caption("Created by VENKAT RAJA S | 2026BTAI462 | JOY UNIVERSITY")
-   
+st.caption("Created by VENKAT RAJA S | 2026BTAI462")
+st.caption("Demo Mode – Uses basic text extraction, not Gemini AI.")
+    
